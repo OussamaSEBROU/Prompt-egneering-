@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 // Main App component
 const App = () => {
@@ -6,11 +6,11 @@ const App = () => {
     const [userPrompt, setUserPrompt] = useState('');
 
     // States for the answers to the 5 specific questions
-    const [q1GoalOutput, setQ1GoalOutput] = useState(''); // New: Goal of the prompt & output type
-    const [q2Audience, setQ2Audience] = useState('');     // New: Intended audience
-    const [q3ModelTool, setQ3ModelTool] = useState('');   // New: Model or tool to be used
-    const [q4ToneStyle, setQ4ToneStyle] = useState('');   // New: Tone or style preferences
-    const [q5Constraints, setQ5Constraints] = useState(''); // New: Constraints or must-haves
+    const [q1GoalOutput, setQ1GoalOutput] = useState('');
+    const [q2Audience, setQ2Audience] = useState('');
+    const [q3ModelTool, setQ3ModelTool] = useState('');
+    const [q4ToneStyle, setQ4ToneStyle] = useState('');
+    const [q5Constraints, setQ5Constraints] = useState('');
 
     // State to hold the optimized prompt returned by the LLM
     const [optimizedPrompt, setOptimizedPrompt] = useState('');
@@ -21,6 +21,25 @@ const App = () => {
     // State for copy feedback message
     const [copyFeedback, setCopyFeedback] = useState('');
 
+    // State to track if all questions are answered (for button enablement)
+    const [allQuestionsAnswered, setAllQuestionsAnswered] = useState(false);
+
+    // Effect to check if all questions are answered
+    useEffect(() => {
+        // This condition checks if the initial prompt and all 5 question fields are non-empty
+        if (userPrompt.trim() !== '' &&
+            q1GoalOutput.trim() !== '' &&
+            q2Audience.trim() !== '' &&
+            q3ModelTool.trim() !== '' &&
+            q4ToneStyle.trim() !== '' &&
+            q5Constraints.trim() !== '') {
+            setAllQuestionsAnswered(true);
+        } else {
+            setAllQuestionsAnswered(false);
+        }
+    }, [userPrompt, q1GoalOutput, q2Audience, q3ModelTool, q4ToneStyle, q5Constraints]);
+
+
     // Function to handle prompt optimization
     const optimizePrompt = async () => {
         setIsLoading(true); // Set loading to true when optimization starts
@@ -28,19 +47,33 @@ const App = () => {
         setOptimizedPrompt(''); // Clear previous optimized prompt
         setCopyFeedback(''); // Clear any previous copy feedback
 
+        // *** IMPORTANT CHANGE: Read API Key from environment variable ***
+        // In a React app built by Create React App, environment variables
+        // prefixed with REACT_APP_ are exposed to the client-side.
+        const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+
+        // Check if API Key is available
+        if (!apiKey) {
+            setError("API Key is missing. Please set REACT_APP_GEMINI_API_KEY in your Render.com environment variables.");
+            setIsLoading(false);
+            return; // Stop execution if API key is missing
+        }
+
         // Construct the prompt for the LLM to act as a prompt engineer,
         // now including the 5 specific answers and a conciseness instruction.
+        // Note: We use the state variables directly here, as `allQuestionsAnswered`
+        // ensures they are filled before this function is called.
         const llmPrompt = `You are an expert prompt engineer. Your task is to take a user's raw prompt and additional contextual information, then optimize the prompt for clarity, specificity, and effectiveness when used with a large language model. The optimized prompt should be concise, actionable, and directly usable by another AI, without any introductory or concluding remarks from you, just the optimized prompt itself.
 
 Here is the user's original prompt:
 '${userPrompt}'
 
 Here is additional context provided by the user through 5 key questions:
-1. Goal of the prompt & Expected Output: ${q1GoalOutput || 'Not specified'}
-2. Intended Audience: ${q2Audience || 'Not specified'}
-3. Model or Tool to be Used: ${q3ModelTool || 'Not specified'}
-4. Tone or Style Preferences: ${q4ToneStyle || 'Not specified'}
-5. Constraints or Must-Haves: ${q5Constraints || 'Not specified'}
+1. Goal of the prompt & Expected Output: ${q1GoalOutput}
+2. Intended Audience: ${q2Audience}
+3. Model or Tool to be Used: ${q3ModelTool}
+4. Tone or Style Preferences: ${q4ToneStyle}
+5. Constraints or Must-Haves: ${q5Constraints}
 
 Please provide ONLY the optimized prompt, without any conversational text or explanation.`;
 
@@ -48,9 +81,6 @@ Please provide ONLY the optimized prompt, without any conversational text or exp
         const payload = {
             contents: [{ role: "user", parts: [{ text: llmPrompt }] }],
         };
-
-        // Define the API key (empty string for Canvas environment)
-        const apiKey = ""; // Canvas will automatically provide this in runtime
 
         // Define the API URL for gemini-2.0-flash
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
@@ -66,6 +96,7 @@ Please provide ONLY the optimized prompt, without any conversational text or exp
             // Check if the response was successful
             if (!response.ok) {
                 const errorData = await response.json();
+                // Improved error message for better debugging
                 throw new Error(`API error: ${response.status} ${response.statusText} - ${errorData.error?.message || 'Unknown error'}`);
             }
 
@@ -97,11 +128,14 @@ Please provide ONLY the optimized prompt, without any conversational text or exp
                 textarea.value = optimizedPrompt;
                 document.body.appendChild(textarea);
                 textarea.select();
-                document.execCommand('copy'); // Use execCommand for broader compatibility in iframes
+                // document.execCommand('copy') is used for broader compatibility in iframes
+                // navigator.clipboard.writeText is more modern but might have iframe restrictions
+                document.execCommand('copy');
                 document.body.removeChild(textarea);
 
                 setCopyFeedback('Copied!');
-                setTimeout(() => setCopyFeedback(''), 2000); // Clear feedback after 2 seconds
+                // Clear feedback after 2 seconds
+                setTimeout(() => setCopyFeedback(''), 2000);
             } catch (err) {
                 console.error('Failed to copy text: ', err);
                 setCopyFeedback('Failed to copy!');
@@ -110,11 +144,11 @@ Please provide ONLY the optimized prompt, without any conversational text or exp
         }
     };
 
-    // Determine if the follow-up questions should be shown
+    // Determine if the follow-up questions section should be shown
     const showQuestions = userPrompt.trim() !== '';
 
-    // Determine if the optimize button should be enabled
-    const isOptimizeButtonEnabled = showQuestions && !isLoading;
+    // Optimize button is enabled only if all questions are answered and not currently loading
+    const isOptimizeButtonEnabled = allQuestionsAnswered && !isLoading;
 
     return (
         // Main container with a professional gradient background and responsive padding
@@ -207,10 +241,10 @@ Please provide ONLY the optimized prompt, without any conversational text or exp
                 )}
 
                 {/* Optimize button */}
-                <div className="flex justify-center mt-8"> {/* Centered button */}
+                <div className="flex justify-center mt-8">
                     <button
                         onClick={optimizePrompt}
-                        disabled={!isOptimizeButtonEnabled}
+                        disabled={!isOptimizeButtonEnabled} // Button disabled if not all questions answered or loading
                         className="w-full max-w-md bg-gradient-to-r from-green-600 to-teal-700 text-white py-4 px-6 rounded-xl text-xl font-bold hover:from-green-700 hover:to-teal-800 transition duration-300 ease-in-out transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg flex items-center justify-center gap-3"
                     >
                         {isLoading ? (
